@@ -1,0 +1,17 @@
+// OpenHAB Items für Hex-Light
+// Diese Datei nach /etc/openhab/items/ kopieren
+
+// Power Switch
+Switch HexLight_Power "Hex-Light Power" <light> { channel="mqtt:topic:myBroker:hexlight:power" }
+
+// Helligkeit (0-100%)
+Dimmer HexLight_Brightness "Helligkeit [%d %%]" <slider> { channel="mqtt:topic:myBroker:hexlight:brightness" }
+
+// Modus (0=Solid, 1=Rainbow, 2=Pulse)
+Number HexLight_Mode "Modus [MAP(hexlight_modes.map):%s]" <settings> { channel="mqtt:topic:myBroker:hexlight:mode" }
+
+// Farbe als JSON String (optional, für erweiterte Steuerung)
+String HexLight_ColorJSON "Farbe JSON" { channel="mqtt:topic:myBroker:hexlight:colorjson" }
+
+// IP Adresse (read-only)
+String HexLight_IP "IP Adresse [%s]" <network> { channel="mqtt:topic:myBroker:hexlight:ipaddress" }

@@ -1,0 +1,47 @@
+// OpenHAB MQTT Thing für Hex-Light
+// Voraussetzung: MQTT Broker Binding installiert
+
+// MQTT Broker Connection (falls noch nicht vorhanden)
+Bridge mqtt:broker:myBroker [
+    host="192.168.3.1",        // IP deines MQTT Brokers
+    port=1883,
+    clientID="openhab",
+    secure=false
+] {
+    // Hex-Light Thing
+    Thing topic hexlight "Hex-Light LED Controller" {
+        Channels:
+            // Power (ON/OFF)
+            Type switch : power "Power" [
+                stateTopic="hexlight/power",
+                commandTopic="hexlight/power/set",
+                on="ON",
+                off="OFF"
+            ]
+
+            // Helligkeit (0-255 → 0-100%)
+            Type dimmer : brightness "Helligkeit" [
+                stateTopic="hexlight/brightness",
+                commandTopic="hexlight/brightness/set",
+                min=0,
+                max=255
+            ]
+
+            // Modus (0=Solid, 1=Rainbow, 2=Pulse)
+            Type number : mode "Modus" [
+                stateTopic="hexlight/mode",
+                commandTopic="hexlight/mode/set"
+            ]
+
+            // Color (als JSON, braucht Transformation)
+            Type string : colorjson "Farbe JSON" [
+                stateTopic="hexlight/color",
+                commandTopic="hexlight/color/set"
+            ]
+
+            // IP Adresse (read-only)
+            Type string : ipaddress "IP Adresse" [
+                stateTopic="hexlight/ip"
+            ]
+    }
+}
