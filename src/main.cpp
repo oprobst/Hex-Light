@@ -8,6 +8,7 @@
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <cmath>  // Für sin, cos, sqrt, abs (Geometrie-Muster)
 #include "credentials.h"  // WiFi Credentials (nicht in Git!)
 
 // ===== LED Configuration =====
@@ -52,6 +53,37 @@ HexSegment hexagons[NUM_HEXAGONS] = {
     {204, 34, true}     // Hexagon 7: LEDs 204-237
 };
 
+// ===== Hexagon Geometrie für übergreifende Muster =====
+// Jedes Hexagon hat 6 Seiten (1=oben, dann im Uhrzeigersinn bis 6)
+// LEDs pro Seite: ~5-6 (34 LEDs / 6 Seiten)
+#define LEDS_PER_SIDE 6  // Aufgerundet für Berechnung
+
+// Nachbar-Verbindung
+struct HexNeighbor {
+    uint8_t side;       // An welcher Seite (1-6)
+    uint8_t neighborHex; // Welches Hexagon (0 = kein Nachbar)
+};
+
+// Hexagon-Geometrie-Konfiguration
+struct HexGeometry {
+    uint8_t hexNumber;      // 1-basiert (wie in Config)
+    uint8_t startSide;      // Startseite der LEDs (1-6)
+    bool clockwise;         // true = Uhrzeigersinn (U), false = gegen (G)
+    HexNeighbor neighbors[6]; // Nachbarn pro Seite
+    float globalY;          // Berechnete globale Y-Position
+    float globalX;          // Berechnete globale X-Position
+};
+
+#define MAX_HEXAGONS 12
+HexGeometry hexGeometry[MAX_HEXAGONS];
+uint8_t numConfiguredHexagons = 0;
+bool geometryConfigLoaded = false;
+
+// Y-Koordinaten-Lookup für LED-Positionen (normalisiert 0.0 - 1.0)
+// Index 0-33 für die 34 LEDs im Hexagon
+float ledGlobalY[NUM_LEDS];
+float ledGlobalX[NUM_LEDS];
+
 // ===== Funktionsdeklarationen =====
 void setupWiFi();
 void setupOTA();
@@ -67,6 +99,18 @@ void mqttReconnect();
 void publishMQTTStatus();
 void loadConfig();
 void saveConfig();
+
+// Hexagon-Geometrie Funktionen
+void loadGeometryConfig();
+bool parseGeometryConfig(const String& config);
+void calculateGlobalPositions();
+void calculateLEDCoordinates();
+float getLEDLocalY(uint8_t hexIndex, uint8_t ledInHex);
+float getLEDLocalX(uint8_t hexIndex, uint8_t ledInHex);
+uint8_t getSideForLED(uint8_t ledInHex, uint8_t startSide, bool clockwise);
+uint8_t getOffsetToSide1(uint8_t startSide, bool clockwise);
+uint8_t getHarmonizedLED(uint8_t hexIndex, uint8_t logicalPos, bool reverseDir = false);
+uint8_t getLogicalFromPhysical(uint8_t hexIndex, uint8_t physicalPos);
 
 // ===== Setup =====
 void setup() {
@@ -86,6 +130,9 @@ void setup() {
 
     // WiFi Setup
     setupWiFi();
+
+    // Hexagon-Geometrie laden (nach WiFi, da IP-basiert)
+    loadGeometryConfig();
 
     // OTA Setup
     setupOTA();
@@ -480,6 +527,7 @@ void handleRoot(AsyncWebServerRequest *request) {
         <h3>Power</h3>
         <button onclick="togglePower()">Toggle Power</button>
         <div class="status">Status: <span id="power-status">ON</span></div>
+        <div class="status">Geometrie: <span id="geometry-status">?</span></div>
     </div>
 
     <div class="control">
@@ -502,19 +550,36 @@ void handleRoot(AsyncWebServerRequest *request) {
     <div class="control">
         <h3>Mode</h3>
         <select id="mode" onchange="setMode()">
-            <option value="0">Solid Color</option>
-            <option value="1">Rainbow</option>
-            <option value="2">Pulse</option>
-            <option value="3">Rainbow per Hexagon</option>
-            <option value="4">Sequential Blink</option>
-            <option value="5">Breathe (Atmen)</option>
-            <option value="6">Strobe (Stroboskop)</option>
-            <option value="7">Flicker (Flackern)</option>
-            <option value="8">Running Light (Einzelne LED)</option>
-            <option value="9">Chase (34 LEDs Schweif)</option>
-            <option value="10">Strobe Long Off (3x Pause)</option>
-            <option value="11">Hexagon Kreislauf (Synchron)</option>
-            <option value="12">Hexagon Kreislauf (Komplementär)</option>
+            <optgroup label="Basis-Effekte">
+                <option value="0">Solid Color</option>
+                <option value="1">Rainbow</option>
+                <option value="2">Pulse</option>
+                <option value="3">Rainbow per Hexagon</option>
+                <option value="4">Sequential Blink</option>
+                <option value="5">Breathe (Atmen)</option>
+                <option value="6">Strobe (Stroboskop)</option>
+                <option value="7">Flicker (Flackern)</option>
+                <option value="8">Running Light (harmonisiert)</option>
+                <option value="9">Chase/Comet (harmonisiert)</option>
+                <option value="10">Strobe Long Off (3x Pause)</option>
+                <option value="11">Kreislauf Synchron</option>
+                <option value="12">Kreislauf Komplementär</option>
+                <option value="20">Kreislauf Alternierend</option>
+                <option value="21">Kreislauf Alt. + Komplementär</option>
+            </optgroup>
+            <optgroup label="Debug">
+                <option value="22">Debug: Physischer Kreislauf</option>
+                <option value="23">Debug: Harmonisierter Kreislauf</option>
+            </optgroup>
+            <optgroup label="Geometrie-Muster">
+                <option value="13">Vertikaler Regenbogen</option>
+                <option value="14">Horizontaler Regenbogen</option>
+                <option value="15">Vertikaler Farbverlauf</option>
+                <option value="16">Vertikale Welle</option>
+                <option value="17">Feuer-Effekt</option>
+                <option value="18">Aurora/Nordlicht</option>
+                <option value="19">Plasma</option>
+            </optgroup>
         </select>
     </div>
 
@@ -582,6 +647,9 @@ void handleRoot(AsyncWebServerRequest *request) {
                     document.getElementById('brightness-value').innerText = d.brightness;
                     document.getElementById('speed').value = d.speed;
                     document.getElementById('speed-value').innerText = d.speed;
+                    document.getElementById('geometry-status').innerText =
+                        d.geometryLoaded ? ('Geladen (' + d.numHexagons + ' Hex)') : 'NICHT GELADEN';
+                    document.getElementById('geometry-status').style.color = d.geometryLoaded ? '#4CAF50' : '#f44336';
                 });
         }, 2000);
     </script>
@@ -601,6 +669,8 @@ void handleGetStatus(AsyncWebServerRequest *request) {
     doc["color"]["r"] = currentColor.r;
     doc["color"]["g"] = currentColor.g;
     doc["color"]["b"] = currentColor.b;
+    doc["geometryLoaded"] = geometryConfigLoaded;
+    doc["numHexagons"] = numConfiguredHexagons;
 
     String response;
     serializeJson(doc, response);
@@ -662,6 +732,470 @@ void saveConfig() {
     preferences.end();
 
     Serial.println("Config saved to Preferences");
+}
+
+// ===== Hexagon-Geometrie Konfiguration =====
+
+/**
+ * Ermittelt die Seite (1-6) für eine LED-Position innerhalb eines Hexagons
+ * Berücksichtigt Startseite und Wicklungsrichtung
+ */
+uint8_t getSideForLED(uint8_t ledInHex, uint8_t startSide, bool clockwise) {
+    // 34 LEDs auf 6 Seiten: 6+6+6+6+5+5 = 34
+    // Seiten haben ca. 5-6 LEDs
+    const uint8_t ledsPerSide[] = {6, 6, 6, 6, 5, 5};  // = 34 total
+
+    uint8_t ledCount = 0;
+    uint8_t sideOffset = 0;
+
+    for (int i = 0; i < 6; i++) {
+        ledCount += ledsPerSide[i];
+        if (ledInHex < ledCount) {
+            sideOffset = i;
+            break;
+        }
+    }
+
+    // Seite berechnen basierend auf Startseite und Richtung
+    int8_t actualSide;
+    if (clockwise) {
+        actualSide = ((startSide - 1) + sideOffset) % 6 + 1;
+    } else {
+        actualSide = ((startSide - 1) - sideOffset + 6) % 6 + 1;
+    }
+
+    return actualSide;
+}
+
+/**
+ * Berechnet den LED-Offset zur Seite 1 (oben) für ein Hexagon
+ * @param startSide Startseite (1-6)
+ * @param clockwise true = Uhrzeigersinn
+ * @return Anzahl LEDs von Position 0 bis Seite 1
+ */
+uint8_t getOffsetToSide1(uint8_t startSide, bool clockwise) {
+    // LEDs pro Seite: 6+6+6+6+5+5 = 34
+    // Kumulative LEDs bis zum START jeder Seite (0-basiert)
+    const uint8_t sideStartLED[] = {0, 6, 12, 18, 24, 29}; // Seite 1,2,3,4,5,6
+
+    // Wie viele Seiten müssen wir "vorwärts" gehen, um von startSide zu Seite 1 zu kommen?
+    int sidesToSide1;
+    if (clockwise) {
+        // Im Uhrzeigersinn: Seite 2 -> braucht 5 Seiten vorwärts um zu Seite 1 zu kommen
+        // Seite 1 -> 0 Seiten, Seite 2 -> 5, Seite 3 -> 4, ...
+        sidesToSide1 = (7 - startSide) % 6;
+    } else {
+        // Gegen Uhrzeigersinn: Seite 2 -> braucht 1 Seite vorwärts
+        // Seite 1 -> 0, Seite 2 -> 1, Seite 3 -> 2, ...
+        sidesToSide1 = (startSide - 1);
+    }
+
+    // Berechne LEDs bis zur Seite 1
+    uint8_t offset = 0;
+    int currentSide = startSide - 1; // 0-basiert
+    const uint8_t ledsPerSide[] = {6, 6, 6, 6, 5, 5};
+
+    for (int i = 0; i < sidesToSide1; i++) {
+        offset += ledsPerSide[currentSide];
+        if (clockwise) {
+            currentSide = (currentSide + 1) % 6;
+        } else {
+            currentSide = (currentSide + 5) % 6; // -1 mod 6
+        }
+    }
+
+    return offset;
+}
+
+/**
+ * Berechnet die "harmonisierte" physische LED-Position für ein Hexagon
+ * Alle Hexagone werden so behandelt, als würden sie bei Seite 1 (oben) starten
+ * und im Uhrzeigersinn laufen.
+ *
+ * @param hexIndex Index des Hexagons (0-basiert)
+ * @param logicalPos Logische Position (0 = oben/Seite 1, im Uhrzeigersinn)
+ * @param reverseDir Wenn true, Animation läuft gegen den Uhrzeigersinn
+ * @return Physische LED-Position innerhalb des Hexagons (0-33)
+ */
+uint8_t getHarmonizedLED(uint8_t hexIndex, uint8_t logicalPos, bool reverseDir) {
+    if (!geometryConfigLoaded || hexIndex >= numConfiguredHexagons) {
+        // Ohne Konfiguration: direkte Zuordnung
+        return logicalPos % LEDS_PER_HEXAGON;
+    }
+
+    HexGeometry& geo = hexGeometry[hexIndex];
+
+    // Offset zur ersten LED von Seite 1 berechnen
+    uint8_t side1Start = getOffsetToSide1(geo.startSide, geo.clockwise);
+
+    // Für UZS-Verkabelung: Start ist erste LED von Seite 1
+    // Für gegen-UZS-Verkabelung: Start ist LETZTE LED von Seite 1 (Seite 1 hat 6 LEDs)
+    uint8_t logicalStartLED;
+    if (geo.clockwise) {
+        logicalStartLED = side1Start;
+    } else {
+        logicalStartLED = side1Start + 5;  // +5 weil Seite 1 hat 6 LEDs (0-5)
+    }
+
+    // Position anpassen wenn Animation rückwärts laufen soll
+    int effectivePos = reverseDir ? (LEDS_PER_HEXAGON - logicalPos) % LEDS_PER_HEXAGON : logicalPos;
+
+    // Physische Position berechnen
+    int physicalPos;
+    if (geo.clockwise) {
+        // UZS-Verkabelung: vorwärts zählen
+        physicalPos = (logicalStartLED + effectivePos) % LEDS_PER_HEXAGON;
+    } else {
+        // Gegen-UZS-Verkabelung: rückwärts zählen
+        physicalPos = (logicalStartLED - effectivePos + LEDS_PER_HEXAGON) % LEDS_PER_HEXAGON;
+    }
+
+    return physicalPos;
+}
+
+/**
+ * Berechnet die logische Position (0 = oben, im Uhrzeigersinn) aus einer physischen LED-Position
+ * Inverse von getHarmonizedLED
+ */
+uint8_t getLogicalFromPhysical(uint8_t hexIndex, uint8_t physicalPos) {
+    if (!geometryConfigLoaded || hexIndex >= numConfiguredHexagons) {
+        return physicalPos % LEDS_PER_HEXAGON;
+    }
+
+    HexGeometry& geo = hexGeometry[hexIndex];
+
+    // Offset zur ersten LED von Seite 1
+    uint8_t side1Start = getOffsetToSide1(geo.startSide, geo.clockwise);
+
+    // Start-LED (wie in getHarmonizedLED)
+    uint8_t logicalStartLED;
+    if (geo.clockwise) {
+        logicalStartLED = side1Start;
+    } else {
+        logicalStartLED = side1Start + 5;
+    }
+
+    // Inverse Berechnung
+    int logicalPos;
+    if (geo.clockwise) {
+        logicalPos = (physicalPos - logicalStartLED + LEDS_PER_HEXAGON) % LEDS_PER_HEXAGON;
+    } else {
+        logicalPos = (logicalStartLED - physicalPos + LEDS_PER_HEXAGON) % LEDS_PER_HEXAGON;
+    }
+
+    return logicalPos;
+}
+
+/**
+ * Berechnet die lokale Y-Koordinate einer LED innerhalb eines Hexagons
+ * Basierend auf der Seite, auf der sich die LED befindet
+ * Hexagon mit flacher Seite oben: Seite 1 = oben (y=1.0), Seite 4 = unten (y=0.0)
+ */
+float getLEDLocalY(uint8_t hexIndex, uint8_t ledInHex) {
+    if (hexIndex >= numConfiguredHexagons) return 0.5f;
+
+    HexGeometry& geo = hexGeometry[hexIndex];
+    uint8_t side = getSideForLED(ledInHex, geo.startSide, geo.clockwise);
+
+    // Y-Werte für jede Seite (flat-top Hexagon)
+    //     _____ Seite 1 (y=1.0)
+    //    /     \
+    // 6 /       \ 2
+    //   \       /
+    // 5  \_____/ 3
+    //     Seite 4 (y=0.0)
+    const float sideY[] = {0.0f, 1.0f, 0.75f, 0.25f, 0.0f, 0.25f, 0.75f}; // Index 1-6
+    return sideY[side];
+}
+
+/**
+ * Berechnet die lokale X-Koordinate einer LED innerhalb eines Hexagons
+ */
+float getLEDLocalX(uint8_t hexIndex, uint8_t ledInHex) {
+    if (hexIndex >= numConfiguredHexagons) return 0.5f;
+
+    HexGeometry& geo = hexGeometry[hexIndex];
+    uint8_t side = getSideForLED(ledInHex, geo.startSide, geo.clockwise);
+
+    // X-Werte für jede Seite (flat-top Hexagon)
+    const float sideX[] = {0.0f, 0.5f, 1.0f, 1.0f, 0.5f, 0.0f, 0.0f}; // Index 1-6
+    return sideX[side];
+}
+
+/**
+ * Parst die Geometrie-Konfiguration aus einem String
+ * Format: "1 2U 3H2; 2 1U 3H3; ..."
+ * - Hexagon-Nummer
+ * - Startseite + Richtung (U=Uhrzeigersinn, G=Gegen)
+ * - Optional: Nachbarn (SeiteHNachbar-Nummer)
+ */
+bool parseGeometryConfig(const String& config) {
+    Serial.println("Parsing geometry config: " + config);
+
+    // Initialisiere alle Hexagone
+    for (int i = 0; i < MAX_HEXAGONS; i++) {
+        hexGeometry[i].hexNumber = 0;
+        hexGeometry[i].startSide = 1;
+        hexGeometry[i].clockwise = true;
+        hexGeometry[i].globalY = 0.0f;
+        hexGeometry[i].globalX = 0.0f;
+        for (int j = 0; j < 6; j++) {
+            hexGeometry[i].neighbors[j].side = 0;
+            hexGeometry[i].neighbors[j].neighborHex = 0;
+        }
+    }
+
+    numConfiguredHexagons = 0;
+    String remaining = config;
+    remaining.trim();
+
+    while (remaining.length() > 0 && numConfiguredHexagons < MAX_HEXAGONS) {
+        // Finde das nächste Semikolon oder Ende
+        int semiPos = remaining.indexOf(';');
+        String hexDef;
+        if (semiPos >= 0) {
+            hexDef = remaining.substring(0, semiPos);
+            remaining = remaining.substring(semiPos + 1);
+            remaining.trim();
+        } else {
+            hexDef = remaining;
+            remaining = "";
+        }
+
+        hexDef.trim();
+        if (hexDef.length() == 0) continue;
+
+        // Parse Hexagon-Definition: "1 2U 3H2"
+        HexGeometry& geo = hexGeometry[numConfiguredHexagons];
+
+        // Teile die Definition in Tokens
+        int spacePos1 = hexDef.indexOf(' ');
+        if (spacePos1 < 0) continue;
+
+        // Hexagon-Nummer
+        geo.hexNumber = hexDef.substring(0, spacePos1).toInt();
+
+        String rest = hexDef.substring(spacePos1 + 1);
+        rest.trim();
+
+        // Startseite und Richtung (z.B. "2U")
+        int spacePos2 = rest.indexOf(' ');
+        String sideDir;
+        String neighbors;
+
+        if (spacePos2 >= 0) {
+            sideDir = rest.substring(0, spacePos2);
+            neighbors = rest.substring(spacePos2 + 1);
+        } else {
+            sideDir = rest;
+            neighbors = "";
+        }
+
+        // Parse Startseite und Richtung
+        int dirPos = sideDir.indexOf('U');
+        if (dirPos >= 0) {
+            geo.startSide = sideDir.substring(0, dirPos).toInt();
+            geo.clockwise = true;
+        } else {
+            dirPos = sideDir.indexOf('G');
+            if (dirPos >= 0) {
+                geo.startSide = sideDir.substring(0, dirPos).toInt();
+                geo.clockwise = false;
+            }
+        }
+
+        // Parse Nachbarn (z.B. "3H2 5H4")
+        neighbors.trim();
+        while (neighbors.length() > 0) {
+            int nextSpace = neighbors.indexOf(' ');
+            String neighborDef;
+            if (nextSpace >= 0) {
+                neighborDef = neighbors.substring(0, nextSpace);
+                neighbors = neighbors.substring(nextSpace + 1);
+                neighbors.trim();
+            } else {
+                neighborDef = neighbors;
+                neighbors = "";
+            }
+
+            // Parse "3H2" -> Seite 3, Nachbar Hexagon 2
+            int hPos = neighborDef.indexOf('H');
+            if (hPos > 0) {
+                uint8_t side = neighborDef.substring(0, hPos).toInt();
+                uint8_t neighborHex = neighborDef.substring(hPos + 1).toInt();
+
+                if (side >= 1 && side <= 6) {
+                    geo.neighbors[side - 1].side = side;
+                    geo.neighbors[side - 1].neighborHex = neighborHex;
+                }
+            }
+        }
+
+        Serial.printf("  Hex %d: Start=%d, CW=%d\n",
+                      geo.hexNumber, geo.startSide, geo.clockwise);
+
+        numConfiguredHexagons++;
+    }
+
+    Serial.printf("Parsed %d hexagons\n", numConfiguredHexagons);
+    return numConfiguredHexagons > 0;
+}
+
+/**
+ * Berechnet die globalen Positionen aller Hexagone basierend auf Nachbarschaften
+ * Verwendet BFS von Hexagon 1 ausgehend
+ */
+void calculateGlobalPositions() {
+    if (numConfiguredHexagons == 0) return;
+
+    // Hexagon 1 als Referenzpunkt
+    hexGeometry[0].globalX = 0.0f;
+    hexGeometry[0].globalY = 0.0f;
+
+    // Array um zu tracken, welche Hexagone bereits positioniert sind
+    bool positioned[MAX_HEXAGONS] = {false};
+    positioned[0] = true;
+
+    // Y/X-Offsets basierend auf Nachbarseite (flat-top Hexagon)
+    // Wenn Nachbar an Seite X liegt, ist dessen Position:
+    const float sideOffsetY[] = {0.0f, 1.0f, 0.5f, -0.5f, -1.0f, -0.5f, 0.5f}; // Index 1-6
+    const float sideOffsetX[] = {0.0f, 0.0f, 0.866f, 0.866f, 0.0f, -0.866f, -0.866f}; // Index 1-6
+
+    // Einfache Iteration (mehrfach durchlaufen für Kaskaden)
+    for (int iteration = 0; iteration < numConfiguredHexagons; iteration++) {
+        for (int i = 0; i < numConfiguredHexagons; i++) {
+            if (!positioned[i]) continue;
+
+            HexGeometry& geo = hexGeometry[i];
+
+            // Prüfe alle Nachbarn
+            for (int side = 0; side < 6; side++) {
+                uint8_t neighborHex = geo.neighbors[side].neighborHex;
+                if (neighborHex == 0) continue;
+
+                // Finde den Index des Nachbarn
+                for (int j = 0; j < numConfiguredHexagons; j++) {
+                    if (hexGeometry[j].hexNumber == neighborHex && !positioned[j]) {
+                        // Berechne Position des Nachbarn
+                        hexGeometry[j].globalX = geo.globalX + sideOffsetX[side + 1];
+                        hexGeometry[j].globalY = geo.globalY + sideOffsetY[side + 1];
+                        positioned[j] = true;
+
+                        Serial.printf("  Hex %d positioned at (%.2f, %.2f)\n",
+                                      neighborHex, hexGeometry[j].globalX, hexGeometry[j].globalY);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Berechnet die globalen Y-Koordinaten für alle LEDs
+ */
+void calculateLEDCoordinates() {
+    // Finde Min/Max Y für Normalisierung
+    float minY = 999.0f, maxY = -999.0f;
+
+    for (int i = 0; i < numConfiguredHexagons; i++) {
+        float hexY = hexGeometry[i].globalY;
+        // Hexagon-Höhe addieren (ca. 1.0 Einheiten)
+        if (hexY - 0.5f < minY) minY = hexY - 0.5f;
+        if (hexY + 0.5f > maxY) maxY = hexY + 0.5f;
+    }
+
+    float range = maxY - minY;
+    if (range < 0.01f) range = 1.0f;
+
+    Serial.printf("Y Range: %.2f to %.2f\n", minY, maxY);
+
+    // Berechne Y-Koordinate für jede LED
+    for (int i = 0; i < numConfiguredHexagons; i++) {
+        if (i >= NUM_HEXAGONS) break;
+
+        HexGeometry& geo = hexGeometry[i];
+        uint16_t hexStart = hexagons[i].startLED;
+        uint16_t hexCount = hexagons[i].count;
+
+        for (int j = 0; j < hexCount; j++) {
+            uint16_t ledIndex = hexStart + j;
+            if (ledIndex >= NUM_LEDS) break;
+
+            // Lokale Y-Position im Hexagon
+            float localY = getLEDLocalY(i, j);
+
+            // Globale Y-Position (Hexagon-Position + lokale Offset)
+            float globalY = geo.globalY + (localY - 0.5f);
+
+            // Normalisieren auf 0.0 - 1.0
+            ledGlobalY[ledIndex] = (globalY - minY) / range;
+
+            // X-Koordinate ähnlich
+            float localX = getLEDLocalX(i, j);
+            ledGlobalX[ledIndex] = geo.globalX + (localX - 0.5f);
+        }
+    }
+
+    Serial.println("LED coordinates calculated");
+}
+
+/**
+ * Lädt die Geometrie-Konfiguration basierend auf der IP-Adresse
+ * Sucht nach /config/<IP>.cfg im LittleFS
+ */
+void loadGeometryConfig() {
+    String ipAddress;
+    if (USE_AP_MODE) {
+        ipAddress = WiFi.softAPIP().toString();
+    } else {
+        ipAddress = WiFi.localIP().toString();
+    }
+
+    String configPath = "/config/" + ipAddress + ".cfg";
+    Serial.println("Looking for geometry config: " + configPath);
+
+    if (LittleFS.exists(configPath)) {
+        File configFile = LittleFS.open(configPath, "r");
+        if (configFile) {
+            String config = configFile.readString();
+            configFile.close();
+
+            if (parseGeometryConfig(config)) {
+                calculateGlobalPositions();
+                calculateLEDCoordinates();
+                geometryConfigLoaded = true;
+                Serial.println("Geometry config loaded successfully!");
+
+                // Debug: Zeige berechnete Werte für jedes Hexagon
+                Serial.println("=== Hexagon Harmonization Debug ===");
+                for (int h = 0; h < numConfiguredHexagons; h++) {
+                    HexGeometry& geo = hexGeometry[h];
+                    uint8_t offset = getOffsetToSide1(geo.startSide, geo.clockwise);
+                    uint8_t startLED = geo.clockwise ? offset : offset + 5;
+                    Serial.printf("Hex %d: start=%d, cw=%d, side1Offset=%d, logicalStart=%d\n",
+                                  geo.hexNumber, geo.startSide, geo.clockwise, offset, startLED);
+                    Serial.printf("  logPos: 0->%d, 1->%d, 2->%d, 6->%d, 33->%d\n",
+                                  getHarmonizedLED(h, 0, false),
+                                  getHarmonizedLED(h, 1, false),
+                                  getHarmonizedLED(h, 2, false),
+                                  getHarmonizedLED(h, 6, false),
+                                  getHarmonizedLED(h, 33, false));
+                }
+                Serial.println("===================================");
+            }
+        }
+    } else {
+        Serial.println("No geometry config found for this IP - using default");
+
+        // Default-Konfiguration: Alle Hexagone nebeneinander (keine Geometrie-Effekte)
+        geometryConfigLoaded = false;
+
+        // Setze Standard-Y-Koordinaten (linear entlang des Strips)
+        for (int i = 0; i < NUM_LEDS; i++) {
+            ledGlobalY[i] = (float)i / NUM_LEDS;
+            ledGlobalX[i] = 0.0f;
+        }
+    }
 }
 
 // ===== LED Update Loop =====
@@ -885,55 +1419,84 @@ void updateLEDs() {
             }
             break;
 
-        case 8: // Running Light (Einzelne LED)
+        case 8: // Running Light (Einzelne LED, harmonisiert über Hexagone)
             {
                 static unsigned long lastMove = 0;
-                static uint16_t currentLED = 0;
+                static uint8_t currentHex = 0;        // Aktuelles Hexagon
+                static uint8_t logicalPosition = 0;   // Logische Position im Hexagon
                 unsigned long now = millis();
 
                 // Geschwindigkeit: 1 = 50ms, 100 = 2.5ms (doppelt so schnell)
-                // Formel: delay = (105 - animationSpeed) / 2
                 unsigned long moveInterval = (105 - animationSpeed) / 2;
                 if (moveInterval < 1) moveInterval = 1;
 
                 if (now - lastMove >= moveInterval) {
                     lastMove = now;
-                    currentLED = (currentLED + 1) % NUM_LEDS;
+                    logicalPosition++;
+                    if (logicalPosition >= LEDS_PER_HEXAGON) {
+                        logicalPosition = 0;
+                        currentHex = (currentHex + 1) % NUM_HEXAGONS;
+                    }
                 }
 
                 // Alle LEDs aus
                 fill_solid(leds, NUM_LEDS, CRGB::Black);
 
-                // Nur die aktuelle LED an
-                leds[currentLED] = currentColor;
+                // Die aktuelle LED im aktuellen Hexagon einschalten
+                if (hexagons[currentHex].enabled) {
+                    uint8_t physicalPos = getHarmonizedLED(currentHex, logicalPosition, false);
+                    leds[hexagons[currentHex].startLED + physicalPos] = currentColor;
+                }
             }
             break;
 
-        case 9: // Chase/Comet (34 LEDs Schweif)
+        case 9: // Chase/Comet (34 LEDs Schweif, harmonisiert)
             {
                 static unsigned long lastMove = 0;
-                static uint16_t headPosition = 0;
+                static uint8_t currentHex = 0;
+                static uint8_t logicalPosition = 0;
                 unsigned long now = millis();
 
                 // Geschwindigkeit: 1 = 100ms, 100 = 5ms
-                // Formel: delay = 105 - animationSpeed
                 unsigned long moveInterval = 105 - animationSpeed;
 
                 if (now - lastMove >= moveInterval) {
                     lastMove = now;
-                    headPosition = (headPosition + 1) % NUM_LEDS;
+                    logicalPosition++;
+                    if (logicalPosition >= LEDS_PER_HEXAGON) {
+                        logicalPosition = 0;
+                        currentHex = (currentHex + 1) % NUM_HEXAGONS;
+                    }
                 }
 
                 // Alle LEDs aus
                 fill_solid(leds, NUM_LEDS, CRGB::Black);
 
-                // 34 LEDs einschalten (von headPosition rückwärts)
-                for (int i = 0; i < LEDS_PER_HEXAGON; i++) {
-                    int ledPos = headPosition - i;
-                    if (ledPos < 0) {
-                        ledPos += NUM_LEDS; // Wrap around
-                    }
-                    leds[ledPos] = currentColor;
+                // Schweif: Ein komplettes Hexagon leuchtend (das aktuelle)
+                // Plus Fade-out ins vorherige
+                int prevHex = (currentHex - 1 + NUM_HEXAGONS) % NUM_HEXAGONS;
+
+                // Aktuelles Hexagon: LEDs von 0 bis logicalPosition leuchten
+                for (int i = 0; i <= logicalPosition; i++) {
+                    uint8_t physicalPos = getHarmonizedLED(currentHex, i, false);
+                    // Helligkeit nimmt ab je weiter hinten
+                    uint8_t brightness = 255 - ((logicalPosition - i) * 7);
+                    CRGB color = currentColor;
+                    color.nscale8(brightness);
+                    leds[hexagons[currentHex].startLED + physicalPos] = color;
+                }
+
+                // Vorheriges Hexagon: Rest des Schweifs
+                int remaining = LEDS_PER_HEXAGON - 1 - logicalPosition;
+                for (int i = 0; i < remaining && i < LEDS_PER_HEXAGON; i++) {
+                    int pos = LEDS_PER_HEXAGON - 1 - i;
+                    uint8_t physicalPos = getHarmonizedLED(prevHex, pos, false);
+                    // Helligkeit nimmt weiter ab
+                    uint8_t brightness = 255 - ((logicalPosition + 1 + i) * 7);
+                    if (brightness > 250) brightness = 0; // Overflow check
+                    CRGB color = currentColor;
+                    color.nscale8(brightness);
+                    leds[hexagons[prevHex].startLED + physicalPos] = color;
                 }
             }
             break;
@@ -964,10 +1527,10 @@ void updateLEDs() {
             }
             break;
 
-        case 11: // Synchronized Hexagon Running Light
+        case 11: // Synchronized Hexagon Running Light (harmonisiert)
             {
                 static unsigned long lastMove = 0;
-                static uint8_t currentPosition = 0;
+                static uint8_t logicalPosition = 0;  // Logische Position (0 = oben)
                 unsigned long now = millis();
 
                 // Geschwindigkeit: 1 = 100ms, 100 = 5ms
@@ -976,25 +1539,27 @@ void updateLEDs() {
 
                 if (now - lastMove >= moveInterval) {
                     lastMove = now;
-                    currentPosition = (currentPosition + 1) % LEDS_PER_HEXAGON;
+                    logicalPosition = (logicalPosition + 1) % LEDS_PER_HEXAGON;
                 }
 
                 // Alle LEDs aus
                 fill_solid(leds, NUM_LEDS, CRGB::Black);
 
-                // In jedem Hexagon die LED an der aktuellen Position einschalten
+                // In jedem Hexagon die LED an der harmonisierten Position einschalten
+                // Alle drehen sich im Uhrzeigersinn, startend an der gleichen Ecke
                 for (int i = 0; i < NUM_HEXAGONS; i++) {
                     if (hexagons[i].enabled) {
-                        leds[hexagons[i].startLED + currentPosition] = currentColor;
+                        uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, false);
+                        leds[hexagons[i].startLED + physicalPos] = currentColor;
                     }
                 }
             }
             break;
 
-        case 12: // Hexagon Running Light mit Komplementärfarbe
+        case 12: // Hexagon Running Light mit Komplementärfarbe (harmonisiert)
             {
                 static unsigned long lastMove = 0;
-                static uint8_t currentPosition = 0;
+                static uint8_t logicalPosition = 0;
                 unsigned long now = millis();
 
                 // Geschwindigkeit: 1 = 100ms, 100 = 5ms
@@ -1003,7 +1568,7 @@ void updateLEDs() {
 
                 if (now - lastMove >= moveInterval) {
                     lastMove = now;
-                    currentPosition = (currentPosition + 1) % LEDS_PER_HEXAGON;
+                    logicalPosition = (logicalPosition + 1) % LEDS_PER_HEXAGON;
                 }
 
                 // Alle LEDs aus
@@ -1014,16 +1579,369 @@ void updateLEDs() {
                 hsvColor.hue += 128; // 180° im Farbkreis (128 von 256)
                 CRGB complementaryColor = hsvColor;
 
-                // Gegenüberliegende Position (34 LEDs / 2 = 17)
-                uint8_t oppositePosition = (currentPosition + (LEDS_PER_HEXAGON / 2)) % LEDS_PER_HEXAGON;
+                // Gegenüberliegende logische Position (34 LEDs / 2 = 17)
+                uint8_t oppositeLogical = (logicalPosition + (LEDS_PER_HEXAGON / 2)) % LEDS_PER_HEXAGON;
 
-                // In jedem Hexagon beide LEDs einschalten
+                // In jedem Hexagon beide LEDs einschalten (harmonisiert)
                 for (int i = 0; i < NUM_HEXAGONS; i++) {
                     if (hexagons[i].enabled) {
+                        uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, false);
+                        uint8_t physicalOpp = getHarmonizedLED(i, oppositeLogical, false);
                         // Hauptfarbe an aktueller Position
-                        leds[hexagons[i].startLED + currentPosition] = currentColor;
+                        leds[hexagons[i].startLED + physicalPos] = currentColor;
                         // Komplementärfarbe an gegenüberliegender Position
-                        leds[hexagons[i].startLED + oppositePosition] = complementaryColor;
+                        leds[hexagons[i].startLED + physicalOpp] = complementaryColor;
+                    }
+                }
+            }
+            break;
+
+        // ===== Übergreifende Geometrie-Muster (benötigen Konfiguration) =====
+
+        case 13: // Vertikaler Regenbogen (unten nach oben, animiert)
+            {
+                static uint8_t hueOffset = 0;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit: 1 = 100ms, 100 = 5ms pro Schritt
+                unsigned long updateInterval = max(5UL, 105UL - animationSpeed);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    hueOffset += 2;  // Größere Schritte für sichtbarere Animation
+                }
+
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    // Y-Koordinate bestimmt den Hue (0.0 = unten = rot, 1.0 = oben = violett)
+                    uint8_t hue = (uint8_t)(ledGlobalY[i] * 255) + hueOffset;
+                    leds[i] = CHSV(hue, 255, 255);
+                }
+            }
+            break;
+
+        case 14: // Horizontaler Regenbogen (links nach rechts, animiert)
+            {
+                static uint8_t hueOffset = 0;
+                static unsigned long lastUpdate = 0;
+                static float minX = 999.0f, maxX = -999.0f;
+                static bool initialized = false;
+                unsigned long now = millis();
+
+                // Min/Max X nur einmal berechnen
+                if (!initialized) {
+                    for (int i = 0; i < NUM_LEDS; i++) {
+                        if (ledGlobalX[i] < minX) minX = ledGlobalX[i];
+                        if (ledGlobalX[i] > maxX) maxX = ledGlobalX[i];
+                    }
+                    initialized = true;
+                }
+                float rangeX = maxX - minX;
+                if (rangeX < 0.01f) rangeX = 1.0f;
+
+                // Geschwindigkeit: 1 = 100ms, 100 = 5ms pro Schritt
+                unsigned long updateInterval = max(5UL, 105UL - animationSpeed);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    hueOffset += 2;  // Größere Schritte für sichtbarere Animation
+                }
+
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    float normalizedX = (ledGlobalX[i] - minX) / rangeX;
+                    uint8_t hue = (uint8_t)(normalizedX * 255) + hueOffset;
+                    leds[i] = CHSV(hue, 255, 255);
+                }
+            }
+            break;
+
+        case 15: // Vertikaler Farbverlauf (currentColor oben, schwarz unten)
+            {
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    // Y = 1.0 (oben) = volle Farbe, Y = 0.0 (unten) = schwarz
+                    CRGB color = currentColor;
+                    color.nscale8((uint8_t)(ledGlobalY[i] * 255));
+                    leds[i] = color;
+                }
+            }
+            break;
+
+        case 16: // Vertikale Welle (Farbe wandert von unten nach oben)
+            {
+                static float wavePosition = 0.0f;
+                static unsigned long lastMove = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit der Welle
+                unsigned long moveInterval = 105 - animationSpeed;
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    wavePosition += 0.02f;
+                    if (wavePosition > 1.5f) wavePosition = -0.5f;
+                }
+
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    // Berechne Distanz zur Wellenposition
+                    float dist = fabs(ledGlobalY[i] - wavePosition);
+
+                    // Welle hat eine Breite von ~0.3
+                    if (dist < 0.15f) {
+                        // Innerhalb der Welle: volle Farbe
+                        uint8_t brightness = (uint8_t)((1.0f - dist / 0.15f) * 255);
+                        CRGB color = currentColor;
+                        color.nscale8(brightness);
+                        leds[i] = color;
+                    } else {
+                        leds[i] = CRGB::Black;
+                    }
+                }
+            }
+            break;
+
+        case 17: // Feuer-Effekt (Flammen von unten)
+            {
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = 105 - animationSpeed;
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+
+                    for (int i = 0; i < NUM_LEDS; i++) {
+                        // Basis-Helligkeit abhängig von Y (unten = hell, oben = dunkel)
+                        float baseHeat = (1.0f - ledGlobalY[i]) * 200;
+
+                        // Zufällige Variation für Flacker-Effekt
+                        int heat = (int)baseHeat + random(-30, 30);
+                        heat = constrain(heat, 0, 255);
+
+                        // Heat-Palette: schwarz -> rot -> orange -> gelb -> weiß
+                        if (heat < 85) {
+                            // Schwarz zu rot
+                            leds[i] = CRGB(heat * 3, 0, 0);
+                        } else if (heat < 170) {
+                            // Rot zu orange/gelb
+                            leds[i] = CRGB(255, (heat - 85) * 3, 0);
+                        } else {
+                            // Orange zu weiß
+                            leds[i] = CRGB(255, 255, (heat - 170) * 3);
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 18: // Aurora/Nordlicht (wellenförmige Farbverläufe)
+            {
+                static float phase = 0.0f;
+                static uint8_t frameCounter = 0;
+
+                frameCounter++;
+                if (frameCounter >= (101 - animationSpeed) / 2) {
+                    phase += 0.05f;
+                    frameCounter = 0;
+                }
+
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    // Mehrere überlagerte Sinuswellen
+                    float wave1 = sin(ledGlobalY[i] * 6.28f + phase) * 0.5f + 0.5f;
+                    float wave2 = sin(ledGlobalX[i] * 4.0f + phase * 1.3f) * 0.5f + 0.5f;
+                    float wave3 = sin((ledGlobalY[i] + ledGlobalX[i]) * 3.0f + phase * 0.7f) * 0.5f + 0.5f;
+
+                    // Kombiniere Wellen für Aurora-Farben (grün/blau/lila)
+                    uint8_t hue = 96 + (uint8_t)((wave1 + wave2) * 64); // Grün-Blau Bereich
+                    uint8_t brightness = (uint8_t)(wave3 * 200 + 55);
+
+                    leds[i] = CHSV(hue, 255, brightness);
+                }
+            }
+            break;
+
+        case 19: // Plasma (psychedelische Farbmuster)
+            {
+                static float time = 0.0f;
+                static uint8_t frameCounter = 0;
+
+                frameCounter++;
+                if (frameCounter >= (101 - animationSpeed) / 3) {
+                    time += 0.1f;
+                    frameCounter = 0;
+                }
+
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    float x = ledGlobalX[i];
+                    float y = ledGlobalY[i];
+
+                    // Klassischer Plasma-Effekt mit mehreren Sinuswellen
+                    float v1 = sin(x * 10.0f + time);
+                    float v2 = sin(10.0f * (x * sin(time / 2.0f) + y * cos(time / 3.0f)) + time);
+                    float cx = x + 0.5f * sin(time / 5.0f);
+                    float cy = y + 0.5f * cos(time / 3.0f);
+                    float v3 = sin(sqrt(100.0f * (cx * cx + cy * cy) + 1.0f) + time);
+
+                    float v = (v1 + v2 + v3) / 3.0f;
+
+                    uint8_t hue = (uint8_t)((v + 1.0f) * 127.5f);
+                    leds[i] = CHSV(hue, 255, 255);
+                }
+            }
+            break;
+
+        case 20: // Alternierender Kreislauf (jedes 2. Hexagon gegen Uhrzeigersinn)
+            {
+                static unsigned long lastMove = 0;
+                static uint8_t logicalPosition = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit: 1 = 100ms, 100 = 5ms
+                unsigned long moveInterval = (105 - animationSpeed) / 2;
+                if (moveInterval < 1) moveInterval = 1;
+
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    logicalPosition = (logicalPosition + 1) % LEDS_PER_HEXAGON;
+                }
+
+                // Alle LEDs aus
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                // Jedes Hexagon: gerade = im Uhrzeigersinn, ungerade = gegen Uhrzeigersinn
+                for (int i = 0; i < NUM_HEXAGONS; i++) {
+                    if (hexagons[i].enabled) {
+                        bool reverseDirection = (i % 2 == 1); // Ungerade = gegen Uhrzeigersinn
+                        uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, reverseDirection);
+                        leds[hexagons[i].startLED + physicalPos] = currentColor;
+                    }
+                }
+            }
+            break;
+
+        case 21: // Alternierender Kreislauf mit Komplementärfarbe
+            {
+                static unsigned long lastMove = 0;
+                static uint8_t logicalPosition = 0;
+                unsigned long now = millis();
+
+                unsigned long moveInterval = (105 - animationSpeed) / 2;
+                if (moveInterval < 1) moveInterval = 1;
+
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    logicalPosition = (logicalPosition + 1) % LEDS_PER_HEXAGON;
+                }
+
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                // Komplementärfarbe berechnen
+                CHSV hsvColor = rgb2hsv_approximate(currentColor);
+                hsvColor.hue += 128;
+                CRGB complementaryColor = hsvColor;
+
+                uint8_t oppositeLogical = (logicalPosition + (LEDS_PER_HEXAGON / 2)) % LEDS_PER_HEXAGON;
+
+                for (int i = 0; i < NUM_HEXAGONS; i++) {
+                    if (hexagons[i].enabled) {
+                        bool reverseDirection = (i % 2 == 1);
+                        uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, reverseDirection);
+                        uint8_t physicalOpp = getHarmonizedLED(i, oppositeLogical, reverseDirection);
+
+                        leds[hexagons[i].startLED + physicalPos] = currentColor;
+                        leds[hexagons[i].startLED + physicalOpp] = complementaryColor;
+                    }
+                }
+            }
+            break;
+
+        case 22: // Debug: Physischer Kreislauf (ignoriert Geometrie-Konfiguration)
+            {
+                // Läuft durch LEDs 0-33 in jedem Hexagon in der physischen Reihenfolge
+                // wie sie auf dem Streifen eingeklebt sind (keine Harmonisierung)
+                // 1 Sekunde Pause vor LED 0 um den Anfang zu identifizieren
+                static unsigned long lastMove = 0;
+                static uint8_t physicalPosition = 0;  // Physische Position (0-33)
+                static bool pauseBeforeStart = false; // Pause-Flag für LED 0
+                unsigned long now = millis();
+
+                // Geschwindigkeit: 1 = 100ms, 100 = 5ms
+                unsigned long moveInterval = (105 - animationSpeed) / 2;
+                if (moveInterval < 1) moveInterval = 1;
+
+                // Pause von 1 Sekunde vor LED 0
+                unsigned long currentInterval = pauseBeforeStart ? 1000 : moveInterval;
+
+                if (now - lastMove >= currentInterval) {
+                    lastMove = now;
+
+                    if (pauseBeforeStart) {
+                        // Pause ist vorbei, jetzt LED 0 anzeigen
+                        pauseBeforeStart = false;
+                    } else {
+                        physicalPosition = (physicalPosition + 1) % LEDS_PER_HEXAGON;
+
+                        // Wenn wir wieder bei 0 sind, nächstes Mal pausieren
+                        if (physicalPosition == 0) {
+                            pauseBeforeStart = true;
+                        }
+                    }
+                }
+
+                // Alle LEDs aus
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                // Während der Pause: alle LEDs aus (nichts anzeigen)
+                if (!pauseBeforeStart) {
+                    // In jedem Hexagon die LED an der physischen Position einschalten
+                    // Keine Harmonisierung - direkt LED 0, 1, 2, ... 33
+                    for (int i = 0; i < NUM_HEXAGONS; i++) {
+                        if (hexagons[i].enabled) {
+                            leds[hexagons[i].startLED + physicalPosition] = currentColor;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 23: // Debug: Harmonisierter Kreislauf (wie Mode 11, aber mit 1s Pause)
+            {
+                // Wie Kreislauf Synchron, aber mit 1 Sekunde Pause vor Position 0
+                // um zu sehen wo die harmonisierte Startposition (oben) ist
+                static unsigned long lastMove = 0;
+                static uint8_t logicalPosition = 0;  // Logische Position (0 = oben)
+                static bool pauseBeforeStart = false;
+                unsigned long now = millis();
+
+                // Geschwindigkeit: 1 = 100ms, 100 = 5ms
+                unsigned long moveInterval = (105 - animationSpeed) / 2;
+                if (moveInterval < 1) moveInterval = 1;
+
+                // Pause von 1 Sekunde vor Position 0
+                unsigned long currentInterval = pauseBeforeStart ? 1000 : moveInterval;
+
+                if (now - lastMove >= currentInterval) {
+                    lastMove = now;
+
+                    if (pauseBeforeStart) {
+                        pauseBeforeStart = false;
+                    } else {
+                        logicalPosition = (logicalPosition + 1) % LEDS_PER_HEXAGON;
+
+                        if (logicalPosition == 0) {
+                            pauseBeforeStart = true;
+                        }
+                    }
+                }
+
+                // Alle LEDs aus
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                // Während der Pause: alle LEDs aus
+                if (!pauseBeforeStart) {
+                    // In jedem Hexagon die LED an der harmonisierten Position einschalten
+                    for (int i = 0; i < NUM_HEXAGONS; i++) {
+                        if (hexagons[i].enabled) {
+                            uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, false);
+                            leds[hexagons[i].startLED + physicalPos] = currentColor;
+                        }
                     }
                 }
             }
