@@ -107,6 +107,7 @@ void calculateGlobalPositions();
 void calculateLEDCoordinates();
 float getLEDLocalY(uint8_t hexIndex, uint8_t ledInHex);
 float getLEDLocalX(uint8_t hexIndex, uint8_t ledInHex);
+float getLEDPreciseY(uint8_t hexIndex, uint8_t ledInHex);
 uint8_t getSideForLED(uint8_t ledInHex, uint8_t startSide, bool clockwise);
 uint8_t getOffsetToSide1(uint8_t startSide, bool clockwise);
 uint8_t getHarmonizedLED(uint8_t hexIndex, uint8_t logicalPos, bool reverseDir = false);
@@ -518,6 +519,45 @@ void handleRoot(AsyncWebServerRequest *request) {
         input[type="range"] { width: 100%; }
         input[type="color"] { width: 100%; height: 50px; }
         .status { background: #333; padding: 10px; border-radius: 4px; margin: 10px 0; }
+
+        /* Mode Categories */
+        .mode-category { margin: 8px 0; }
+        .category-header {
+            background: #3a3a3a;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .category-header:hover { background: #444; }
+        .arrow { transition: transform 0.2s; font-size: 0.8em; }
+        .arrow.open { transform: rotate(90deg); }
+        .category-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 10px;
+            background: #252525;
+            border-radius: 0 0 6px 6px;
+            margin-top: -2px;
+        }
+        .mode-btn {
+            padding: 8px 12px;
+            font-size: 13px;
+            background: #444;
+            border: 2px solid transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .mode-btn:hover { background: #555; }
+        .mode-btn.active {
+            background: #4CAF50;
+            border-color: #6fcf73;
+        }
     </style>
 </head>
 <body>
@@ -548,39 +588,87 @@ void handleRoot(AsyncWebServerRequest *request) {
     </div>
 
     <div class="control">
-        <h3>Mode</h3>
-        <select id="mode" onchange="setMode()">
-            <optgroup label="Basis-Effekte">
-                <option value="0">Solid Color</option>
-                <option value="1">Rainbow</option>
-                <option value="2">Pulse</option>
-                <option value="3">Rainbow per Hexagon</option>
-                <option value="4">Sequential Blink</option>
-                <option value="5">Breathe (Atmen)</option>
-                <option value="6">Strobe (Stroboskop)</option>
-                <option value="7">Flicker (Flackern)</option>
-                <option value="8">Running Light (harmonisiert)</option>
-                <option value="9">Chase/Comet (harmonisiert)</option>
-                <option value="10">Strobe Long Off (3x Pause)</option>
-                <option value="11">Kreislauf Synchron</option>
-                <option value="12">Kreislauf Komplementär</option>
-                <option value="20">Kreislauf Alternierend</option>
-                <option value="21">Kreislauf Alt. + Komplementär</option>
-            </optgroup>
-            <optgroup label="Debug">
-                <option value="22">Debug: Physischer Kreislauf</option>
-                <option value="23">Debug: Harmonisierter Kreislauf</option>
-            </optgroup>
-            <optgroup label="Geometrie-Muster">
-                <option value="13">Vertikaler Regenbogen</option>
-                <option value="14">Horizontaler Regenbogen</option>
-                <option value="15">Vertikaler Farbverlauf</option>
-                <option value="16">Vertikale Welle</option>
-                <option value="17">Feuer-Effekt</option>
-                <option value="18">Aurora/Nordlicht</option>
-                <option value="19">Plasma</option>
-            </optgroup>
-        </select>
+        <h3>Effekt <span id="current-mode-name" style="color:#4CAF50; font-size:0.8em;">(Solid Color)</span></h3>
+
+        <div class="mode-category">
+            <div class="category-header" onclick="toggleCategory('basis')">
+                <span class="arrow" id="arrow-basis">▶</span> Basis-Effekte
+            </div>
+            <div class="category-content" id="cat-basis" style="display:none;">
+                <button class="mode-btn" data-mode="0">Solid Color</button>
+                <button class="mode-btn" data-mode="1">Rainbow</button>
+                <button class="mode-btn" data-mode="2">Pulse</button>
+                <button class="mode-btn" data-mode="3">Rainbow/Hex</button>
+                <button class="mode-btn" data-mode="4">Blink Seq.</button>
+                <button class="mode-btn" data-mode="5">Breathe</button>
+                <button class="mode-btn" data-mode="6">Strobe</button>
+                <button class="mode-btn" data-mode="7">Flicker</button>
+                <button class="mode-btn" data-mode="10">Strobe Long</button>
+                <button class="mode-btn" data-mode="28">Herzschlag</button>
+                <button class="mode-btn" data-mode="29">Funken</button>
+            </div>
+        </div>
+
+        <div class="mode-category">
+            <div class="category-header" onclick="toggleCategory('kreislauf')">
+                <span class="arrow" id="arrow-kreislauf">▶</span> Kreislauf-Effekte
+            </div>
+            <div class="category-content" id="cat-kreislauf" style="display:none;">
+                <button class="mode-btn" data-mode="8">Running Light</button>
+                <button class="mode-btn" data-mode="9">Chase/Comet</button>
+                <button class="mode-btn" data-mode="11">Synchron</button>
+                <button class="mode-btn" data-mode="12">Komplementär</button>
+                <button class="mode-btn" data-mode="20">Alternierend</button>
+                <button class="mode-btn" data-mode="21">Alt.+Kompl.</button>
+            </div>
+        </div>
+
+        <div class="mode-category">
+            <div class="category-header" onclick="toggleCategory('geometrie')">
+                <span class="arrow" id="arrow-geometrie">▶</span> Geometrie-Muster
+            </div>
+            <div class="category-content" id="cat-geometrie" style="display:none;">
+                <button class="mode-btn" data-mode="13">V-Regenbogen</button>
+                <button class="mode-btn" data-mode="14">H-Regenbogen</button>
+                <button class="mode-btn" data-mode="15">V-Farbverlauf</button>
+                <button class="mode-btn" data-mode="35">Farbrad</button>
+                <button class="mode-btn" data-mode="16">Welle (Kanten)</button>
+                <button class="mode-btn" data-mode="24">Welle (LED)</button>
+                <button class="mode-btn" data-mode="34">Wellen-Kollision</button>
+                <button class="mode-btn" data-mode="39">Wellenwand</button>
+                <button class="mode-btn" data-mode="25">Radial In→Out</button>
+                <button class="mode-btn" data-mode="26">Radial Out→In</button>
+                <button class="mode-btn" data-mode="36">Atmendes Zentrum</button>
+                <button class="mode-btn" data-mode="27">Strudel</button>
+                <button class="mode-btn" data-mode="17">Feuer</button>
+                <button class="mode-btn" data-mode="18">Aurora</button>
+                <button class="mode-btn" data-mode="19">Plasma</button>
+                <button class="mode-btn" data-mode="32">Lava Lamp</button>
+            </div>
+        </div>
+
+        <div class="mode-category">
+            <div class="category-header" onclick="toggleCategory('spezial')">
+                <span class="arrow" id="arrow-spezial">▶</span> Spezial-Effekte
+            </div>
+            <div class="category-content" id="cat-spezial" style="display:none;">
+                <button class="mode-btn" data-mode="30">Regen</button>
+                <button class="mode-btn" data-mode="31">Bouncing Ball</button>
+                <button class="mode-btn" data-mode="33">Matrix Rain</button>
+                <button class="mode-btn" data-mode="37">Schachbrett</button>
+                <button class="mode-btn" data-mode="38">Meteor</button>
+            </div>
+        </div>
+
+        <div class="mode-category">
+            <div class="category-header" onclick="toggleCategory('debug')">
+                <span class="arrow" id="arrow-debug">▶</span> Debug
+            </div>
+            <div class="category-content" id="cat-debug" style="display:none;">
+                <button class="mode-btn" data-mode="22">Phys. Kreislauf</button>
+                <button class="mode-btn" data-mode="23">Harm. Kreislauf</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -627,18 +715,60 @@ void handleRoot(AsyncWebServerRequest *request) {
             });
         }
 
-        function setMode() {
-            const mode = document.getElementById('mode').value;
+        // Mode names for display
+        const modeNames = {
+            0: 'Solid Color', 1: 'Rainbow', 2: 'Pulse', 3: 'Rainbow/Hex',
+            4: 'Blink Seq.', 5: 'Breathe', 6: 'Strobe', 7: 'Flicker',
+            8: 'Running Light', 9: 'Chase/Comet', 10: 'Strobe Long',
+            11: 'Synchron', 12: 'Komplementär', 13: 'V-Regenbogen',
+            14: 'H-Regenbogen', 15: 'V-Farbverlauf', 16: 'Welle (Kanten)',
+            17: 'Feuer', 18: 'Aurora', 19: 'Plasma',
+            20: 'Alternierend', 21: 'Alt.+Kompl.',
+            22: 'Phys. Kreislauf', 23: 'Harm. Kreislauf',
+            24: 'Welle (LED)', 25: 'Radial In→Out', 26: 'Radial Out→In',
+            27: 'Strudel', 28: 'Herzschlag', 29: 'Funken',
+            30: 'Regen', 31: 'Bouncing Ball', 32: 'Lava Lamp',
+            33: 'Matrix Rain', 34: 'Wellen-Kollision', 35: 'Farbrad',
+            36: 'Atmendes Zentrum', 37: 'Schachbrett', 38: 'Meteor', 39: 'Wellenwand'
+        };
 
+        function toggleCategory(name) {
+            const content = document.getElementById('cat-' + name);
+            const arrow = document.getElementById('arrow-' + name);
+            if (content.style.display === 'none') {
+                content.style.display = 'flex';
+                arrow.classList.add('open');
+            } else {
+                content.style.display = 'none';
+                arrow.classList.remove('open');
+            }
+        }
+
+        function setMode(mode) {
             fetch('/api/mode', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode: parseInt(mode) })
-            });
+            }).then(() => updateActiveButton(mode));
         }
 
+        function updateActiveButton(mode) {
+            // Remove active from all buttons
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            // Add active to current
+            const activeBtn = document.querySelector('.mode-btn[data-mode="' + mode + '"]');
+            if (activeBtn) activeBtn.classList.add('active');
+            // Update mode name
+            document.getElementById('current-mode-name').innerText = '(' + (modeNames[mode] || 'Mode ' + mode) + ')';
+        }
+
+        // Add click handlers to all mode buttons
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => setMode(btn.dataset.mode));
+        });
+
         // Update status periodically
-        setInterval(() => {
+        function updateStatus() {
             fetch('/api/status')
                 .then(r => r.json())
                 .then(d => {
@@ -650,8 +780,11 @@ void handleRoot(AsyncWebServerRequest *request) {
                     document.getElementById('geometry-status').innerText =
                         d.geometryLoaded ? ('Geladen (' + d.numHexagons + ' Hex)') : 'NICHT GELADEN';
                     document.getElementById('geometry-status').style.color = d.geometryLoaded ? '#4CAF50' : '#f44336';
+                    updateActiveButton(d.mode);
                 });
-        }, 2000);
+        }
+        updateStatus(); // Initial load
+        setInterval(updateStatus, 2000);
     </script>
 </body>
 </html>
@@ -920,6 +1053,85 @@ float getLEDLocalX(uint8_t hexIndex, uint8_t ledInHex) {
     // X-Werte für jede Seite (flat-top Hexagon)
     const float sideX[] = {0.0f, 0.5f, 1.0f, 1.0f, 0.5f, 0.0f, 0.0f}; // Index 1-6
     return sideX[side];
+}
+
+/**
+ * Berechnet die präzise lokale Y-Koordinate einer LED innerhalb eines Hexagons
+ * Im Gegensatz zu getLEDLocalY, die nur Seiten-basierte Y-Werte liefert,
+ * interpoliert diese Funktion die Y-Position entlang der schrägen Seiten.
+ *
+ * Hexagon mit flacher Seite oben:
+ *      _____ Seite 1 (y=1.0, konstant)
+ *     /     \
+ *  6 /       \ 2  (y interpoliert 0.5-1.0 / 1.0-0.5)
+ *    \       /
+ *  5  \_____/ 3   (y interpoliert 0.0-0.5 / 0.5-0.0)
+ *      Seite 4 (y=0.0, konstant)
+ */
+float getLEDPreciseY(uint8_t hexIndex, uint8_t ledInHex) {
+    if (hexIndex >= numConfiguredHexagons) return 0.5f;
+
+    HexGeometry& geo = hexGeometry[hexIndex];
+
+    // LED-Verteilung pro Seite: 6+6+6+6+5+5 = 34
+    const uint8_t ledsPerSide[] = {6, 6, 6, 6, 5, 5};
+    const uint8_t sideStart[] = {0, 6, 12, 18, 24, 29};  // Kumulative Startpositionen
+
+    // Finde die Seite und Position innerhalb der Seite
+    uint8_t sideIndex = 0;
+    uint8_t posInSide = 0;
+
+    for (int i = 0; i < 6; i++) {
+        if (ledInHex < sideStart[i] + ledsPerSide[i]) {
+            sideIndex = i;
+            posInSide = ledInHex - sideStart[i];
+            break;
+        }
+    }
+
+    // Berechne die logische Seite basierend auf Startseite und Richtung
+    int8_t logicalSide;
+    if (geo.clockwise) {
+        logicalSide = ((geo.startSide - 1) + sideIndex) % 6 + 1;
+    } else {
+        logicalSide = ((geo.startSide - 1) - sideIndex + 6) % 6 + 1;
+    }
+
+    // Berechne den Fortschritt innerhalb der Seite (0.0 - 1.0)
+    float progress = (float)posInSide / (ledsPerSide[sideIndex] - 1);
+    if (ledsPerSide[sideIndex] <= 1) progress = 0.5f;
+
+    // Bei gegen-UZS-Richtung ist der Fortschritt umgekehrt
+    if (!geo.clockwise) {
+        progress = 1.0f - progress;
+    }
+
+    // Y-Werte basierend auf logischer Seite und Position
+    float y;
+    switch (logicalSide) {
+        case 1:  // Oben (horizontal, konstant y=1.0)
+            y = 1.0f;
+            break;
+        case 2:  // Rechts oben (y geht von 1.0 nach 0.5)
+            y = 1.0f - (progress * 0.5f);
+            break;
+        case 3:  // Rechts unten (y geht von 0.5 nach 0.0)
+            y = 0.5f - (progress * 0.5f);
+            break;
+        case 4:  // Unten (horizontal, konstant y=0.0)
+            y = 0.0f;
+            break;
+        case 5:  // Links unten (y geht von 0.0 nach 0.5)
+            y = 0.0f + (progress * 0.5f);
+            break;
+        case 6:  // Links oben (y geht von 0.5 nach 1.0)
+            y = 0.5f + (progress * 0.5f);
+            break;
+        default:
+            y = 0.5f;
+    }
+
+    return y;
 }
 
 /**
@@ -1941,6 +2153,837 @@ void updateLEDs() {
                         if (hexagons[i].enabled) {
                             uint8_t physicalPos = getHarmonizedLED(i, logicalPosition, false);
                             leds[hexagons[i].startLED + physicalPos] = currentColor;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 24: // LED-Welle (pro Höhe) - Welle wandert von unten nach oben, LEDs auf gleicher Höhe leuchten gleichzeitig
+            {
+                static float wavePosition = 0.0f;
+                static unsigned long lastMove = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit der Welle
+                unsigned long moveInterval = 105 - animationSpeed;
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    wavePosition += 0.03f;
+                    if (wavePosition > 1.5f) wavePosition = -0.5f;
+                }
+
+                // Für jedes Hexagon: berechne präzise Y-Koordinate jeder LED
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        // Präzise lokale Y-Koordinate dieser LED
+                        float localY = getLEDPreciseY(h, j);
+
+                        // Globale Y-Position (Hexagon-Position + lokale Offset)
+                        float globalY = localY;
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            globalY = hexGeometry[h].globalY + (localY - 0.5f);
+                        }
+
+                        // Berechne Distanz zur Wellenposition
+                        float dist = fabs(globalY - wavePosition);
+
+                        // Welle hat eine Breite von ~0.15 (schmalere Welle für präziseren Effekt)
+                        if (dist < 0.12f) {
+                            // Innerhalb der Welle: Helligkeit basierend auf Distanz
+                            uint8_t brightness = (uint8_t)((1.0f - dist / 0.12f) * 255);
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 25: // Radiale Welle (innen nach außen) - Welle expandiert vom Zentrum
+            {
+                static float waveRadius = 0.0f;
+                static unsigned long lastMove = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit der Welle
+                unsigned long moveInterval = 105 - animationSpeed;
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    waveRadius += 0.04f;
+                    if (waveRadius > 3.0f) waveRadius = 0.0f;  // Reset wenn Welle das Feld verlässt
+                }
+
+                // Zentrum berechnen (Durchschnitt aller Hexagon-Positionen)
+                float centerX = 0.0f, centerY = 0.0f;
+                if (geometryConfigLoaded) {
+                    for (int h = 0; h < numConfiguredHexagons; h++) {
+                        centerX += hexGeometry[h].globalX;
+                        centerY += hexGeometry[h].globalY;
+                    }
+                    centerX /= numConfiguredHexagons;
+                    centerY /= numConfiguredHexagons;
+                }
+
+                // Für jede LED: Distanz zum Zentrum berechnen
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float ledX = ledGlobalX[ledIndex];
+                        float ledY = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            ledY = hexGeometry[h].globalY + (ledY - 0.5f);
+                        }
+
+                        // Distanz zum Zentrum
+                        float dx = ledX - centerX;
+                        float dy = ledY - centerY;
+                        float distFromCenter = sqrt(dx * dx + dy * dy);
+
+                        // Distanz zur Wellenfront
+                        float distToWave = fabs(distFromCenter - waveRadius);
+
+                        // Welle hat eine Breite von ~0.2
+                        if (distToWave < 0.15f) {
+                            uint8_t brightness = (uint8_t)((1.0f - distToWave / 0.15f) * 255);
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 26: // Radiale Welle (außen nach innen) - Welle kontrahiert zum Zentrum
+            {
+                static float waveRadius = 3.0f;
+                static unsigned long lastMove = 0;
+                unsigned long now = millis();
+
+                // Geschwindigkeit der Welle
+                unsigned long moveInterval = 105 - animationSpeed;
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    waveRadius -= 0.04f;
+                    if (waveRadius < 0.0f) waveRadius = 3.0f;  // Reset
+                }
+
+                // Zentrum berechnen
+                float centerX = 0.0f, centerY = 0.0f;
+                if (geometryConfigLoaded) {
+                    for (int h = 0; h < numConfiguredHexagons; h++) {
+                        centerX += hexGeometry[h].globalX;
+                        centerY += hexGeometry[h].globalY;
+                    }
+                    centerX /= numConfiguredHexagons;
+                    centerY /= numConfiguredHexagons;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float ledX = ledGlobalX[ledIndex];
+                        float ledY = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            ledY = hexGeometry[h].globalY + (ledY - 0.5f);
+                        }
+
+                        float dx = ledX - centerX;
+                        float dy = ledY - centerY;
+                        float distFromCenter = sqrt(dx * dx + dy * dy);
+                        float distToWave = fabs(distFromCenter - waveRadius);
+
+                        if (distToWave < 0.15f) {
+                            uint8_t brightness = (uint8_t)((1.0f - distToWave / 0.15f) * 255);
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 27: // Strudel/Wirbel - Spirale die sich dreht
+            {
+                static float angle = 0.0f;
+                static unsigned long lastMove = 0;
+                unsigned long now = millis();
+
+                unsigned long moveInterval = max(5UL, 105UL - animationSpeed);
+                if (now - lastMove >= moveInterval) {
+                    lastMove = now;
+                    angle += 0.08f;
+                    if (angle > 6.28f) angle -= 6.28f;
+                }
+
+                // Zentrum berechnen
+                float centerX = 0.0f, centerY = 0.0f;
+                if (geometryConfigLoaded) {
+                    for (int h = 0; h < numConfiguredHexagons; h++) {
+                        centerX += hexGeometry[h].globalX;
+                        centerY += hexGeometry[h].globalY;
+                    }
+                    centerX /= numConfiguredHexagons;
+                    centerY /= numConfiguredHexagons;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float ledX = ledGlobalX[ledIndex];
+                        float ledY = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            ledY = hexGeometry[h].globalY + (ledY - 0.5f);
+                        }
+
+                        float dx = ledX - centerX;
+                        float dy = ledY - centerY;
+                        float distFromCenter = sqrt(dx * dx + dy * dy);
+
+                        // Winkel der LED zum Zentrum
+                        float ledAngle = atan2(dy, dx);
+
+                        // Spirale: Winkel + Distanz-basierter Offset + Animation
+                        float spiralValue = sin(ledAngle * 3.0f + distFromCenter * 4.0f + angle);
+
+                        // Nur positive Werte der Spirale anzeigen
+                        if (spiralValue > 0.3f) {
+                            uint8_t brightness = (uint8_t)((spiralValue - 0.3f) / 0.7f * 255);
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 28: // Herzschlag - Doppelter Puls wie ein Herzschlag
+            {
+                static unsigned long cycleStart = 0;
+                static uint8_t phase = 0;  // 0=Pause, 1=Puls1, 2=Pause2, 3=Puls2
+                unsigned long now = millis();
+
+                // Geschwindigkeit: beeinflusst die Gesamtzyklusdauer
+                // Speed 50 = ca. 60 BPM (1 Sek pro Schlag)
+                unsigned long beatDuration = 2000 - (animationSpeed * 15);  // 500ms - 1850ms
+
+                unsigned long elapsed = now - cycleStart;
+                float progress = (float)elapsed / beatDuration;
+
+                if (progress >= 1.0f) {
+                    cycleStart = now;
+                    progress = 0.0f;
+                }
+
+                // Herzschlag-Kurve: zwei Peaks bei ~20% und ~40%
+                float brightness = 0.0f;
+
+                if (progress < 0.15f) {
+                    // Erster Anstieg (schnell)
+                    brightness = progress / 0.15f;
+                } else if (progress < 0.25f) {
+                    // Erster Peak und Abfall
+                    brightness = 1.0f - ((progress - 0.15f) / 0.10f) * 0.6f;
+                } else if (progress < 0.35f) {
+                    // Zweiter Anstieg
+                    brightness = 0.4f + ((progress - 0.25f) / 0.10f) * 0.6f;
+                } else if (progress < 0.50f) {
+                    // Zweiter Abfall
+                    brightness = 1.0f - ((progress - 0.35f) / 0.15f);
+                } else {
+                    // Pause bis zum nächsten Schlag
+                    brightness = 0.0f;
+                }
+
+                brightness = constrain(brightness, 0.0f, 1.0f);
+
+                CRGB color = currentColor;
+                color.nscale8((uint8_t)(brightness * 255));
+                fill_solid(leds, NUM_LEDS, color);
+            }
+            break;
+
+        case 29: // Sternenfunken - Zufällige LEDs funkeln auf
+            {
+                static unsigned long lastSparkle = 0;
+                static uint8_t sparkleDecay[NUM_LEDS] = {0};  // Helligkeit jeder LED
+                unsigned long now = millis();
+
+                // Geschwindigkeit beeinflusst wie oft neue Funken entstehen
+                unsigned long sparkleInterval = 150 - animationSpeed;
+
+                // Alle LEDs langsam abdunkeln
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    if (sparkleDecay[i] > 5) {
+                        sparkleDecay[i] -= 5;
+                    } else {
+                        sparkleDecay[i] = 0;
+                    }
+                }
+
+                // Neue Funken hinzufügen
+                if (now - lastSparkle >= sparkleInterval) {
+                    lastSparkle = now;
+
+                    // 3-8 neue Funken pro Intervall
+                    int numSparks = random(3, 9);
+                    for (int s = 0; s < numSparks; s++) {
+                        int randomLED = random(NUM_LEDS);
+                        sparkleDecay[randomLED] = 255;
+                    }
+                }
+
+                // LEDs entsprechend der Helligkeit setzen
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    if (sparkleDecay[i] > 0) {
+                        CRGB color = currentColor;
+                        color.nscale8(sparkleDecay[i]);
+                        leds[i] = color;
+                    } else {
+                        leds[i] = CRGB::Black;
+                    }
+                }
+            }
+            break;
+
+        case 30: // Regen/Tropfen - LEDs fallen wie Regentropfen nach unten
+            {
+                static uint8_t dropBrightness[NUM_LEDS] = {0};
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = 80 - (animationSpeed * 0.7f);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+
+                    // Alle Tropfen nach unten bewegen (niedrigere Y = weiter unten)
+                    for (int h = 0; h < NUM_HEXAGONS; h++) {
+                        if (!hexagons[h].enabled) continue;
+
+                        // Sortiere LEDs nach Y-Koordinate und bewege Helligkeit nach unten
+                        for (int j = 0; j < hexagons[h].count; j++) {
+                            uint16_t ledIndex = hexagons[h].startLED + j;
+                            if (dropBrightness[ledIndex] > 0) {
+                                dropBrightness[ledIndex] -= 15;
+                                if (dropBrightness[ledIndex] < 15) dropBrightness[ledIndex] = 0;
+                            }
+                        }
+                    }
+
+                    // Neue Tropfen oben spawnen (Y > 0.9)
+                    if (random(100) < 30 + animationSpeed / 3) {
+                        for (int h = 0; h < NUM_HEXAGONS; h++) {
+                            if (!hexagons[h].enabled) continue;
+                            for (int j = 0; j < hexagons[h].count; j++) {
+                                float y = getLEDPreciseY(h, j);
+                                if (y > 0.9f && random(100) < 20) {
+                                    dropBrightness[hexagons[h].startLED + j] = 255;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // LEDs setzen
+                for (int i = 0; i < NUM_LEDS; i++) {
+                    if (dropBrightness[i] > 0) {
+                        CRGB color = currentColor;
+                        color.nscale8(dropBrightness[i]);
+                        leds[i] = color;
+                    } else {
+                        leds[i] = CRGB::Black;
+                    }
+                }
+            }
+            break;
+
+        case 31: // Bouncing Ball - Springender Ball mit Physik
+            {
+                static float ballY = 1.0f;      // Position (1.0 = oben, 0.0 = unten)
+                static float ballVelocity = 0.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                const float gravity = 0.003f;
+                const float bounceFactor = 0.85f;
+                const float ballSize = 0.15f;
+
+                unsigned long updateInterval = 25 - (animationSpeed / 5);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+
+                    // Physik-Update
+                    ballVelocity -= gravity;
+                    ballY += ballVelocity;
+
+                    // Bounce am Boden
+                    if (ballY <= 0.0f) {
+                        ballY = 0.0f;
+                        ballVelocity = -ballVelocity * bounceFactor;
+
+                        // Wenn fast keine Energie mehr, neu starten
+                        if (fabs(ballVelocity) < 0.01f) {
+                            ballY = 1.0f;
+                            ballVelocity = 0.0f;
+                        }
+                    }
+                }
+
+                // LEDs basierend auf Ball-Position setzen
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+                        float ledY = getLEDPreciseY(h, j);
+
+                        float dist = fabs(ledY - ballY);
+                        if (dist < ballSize) {
+                            uint8_t brightness = (uint8_t)((1.0f - dist / ballSize) * 255);
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 32: // Lava Lamp - Langsam fließende Farbblobs
+            {
+                static float time = 0.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = max(10UL, 60UL - (animationSpeed / 2));
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    time += 0.02f;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float x = ledGlobalX[ledIndex];
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        // Mehrere langsame Blob-Bewegungen überlagern
+                        float blob1 = sin(y * 3.0f + time * 0.5f) * sin(x * 2.0f + time * 0.3f);
+                        float blob2 = sin(y * 2.0f - time * 0.4f + 1.5f) * cos(x * 3.0f + time * 0.2f);
+                        float blob3 = cos(y * 4.0f + time * 0.6f) * sin(x * 1.5f - time * 0.35f);
+
+                        float combined = (blob1 + blob2 + blob3) / 3.0f;
+                        combined = (combined + 1.0f) / 2.0f;  // Normalisieren auf 0-1
+
+                        // Farbton basierend auf Position und Zeit leicht variieren
+                        CHSV hsvColor = rgb2hsv_approximate(currentColor);
+                        hsvColor.hue += (uint8_t)(combined * 30 - 15);
+                        uint8_t brightness = (uint8_t)(combined * 255);
+                        hsvColor.val = brightness;
+
+                        leds[ledIndex] = hsvColor;
+                    }
+                }
+            }
+            break;
+
+        case 33: // Matrix/Digital Rain - Fallende Streifen
+            {
+                static uint8_t columnState[NUM_HEXAGONS * 6] = {0};  // Pro Seite
+                static uint8_t columnPos[NUM_HEXAGONS * 6] = {0};
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = 120 - animationSpeed;
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+
+                    // Jede "Spalte" (Seite) aktualisieren
+                    for (int col = 0; col < NUM_HEXAGONS * 6; col++) {
+                        if (columnState[col] > 0) {
+                            columnPos[col]++;
+                            if (columnPos[col] > 6) {  // Seite durchlaufen
+                                columnState[col] = 0;
+                            }
+                        } else if (random(100) < 15) {
+                            // Neue Spalte starten
+                            columnState[col] = 255;
+                            columnPos[col] = 0;
+                        }
+                    }
+                }
+
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                // LEDs basierend auf Spalten-Status setzen
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int side = 0; side < 6; side++) {
+                        int colIdx = h * 6 + side;
+                        if (columnState[colIdx] > 0) {
+                            // LEDs auf dieser Seite, Position columnPos
+                            for (int j = 0; j < hexagons[h].count; j++) {
+                                float y = getLEDPreciseY(h, j);
+                                // Mapping: columnPos 0-6 entspricht y 1.0-0.0
+                                float targetY = 1.0f - (columnPos[colIdx] / 6.0f);
+                                float dist = fabs(y - targetY);
+
+                                if (dist < 0.2f) {
+                                    uint8_t brightness = (uint8_t)((1.0f - dist / 0.2f) * 255);
+                                    // Matrix-Grün oder gewählte Farbe
+                                    CRGB color = currentColor;
+                                    color.nscale8(brightness);
+                                    leds[hexagons[h].startLED + j] += color;  // Addieren für Überlappung
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 34: // Wellen-Kollision - Mehrere Wellen treffen aufeinander
+            {
+                static float wave1Pos = 0.0f;
+                static float wave2Pos = 1.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = 80 - (animationSpeed * 0.7f);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    wave1Pos += 0.03f;
+                    wave2Pos -= 0.03f;
+
+                    // Reset wenn Wellen sich getroffen haben und weitergegangen sind
+                    if (wave1Pos > 1.5f) wave1Pos = -0.5f;
+                    if (wave2Pos < -0.5f) wave2Pos = 1.5f;
+                }
+
+                // Komplementärfarbe für zweite Welle
+                CHSV hsvColor = rgb2hsv_approximate(currentColor);
+                hsvColor.hue += 128;
+                CRGB complementaryColor = hsvColor;
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        float dist1 = fabs(y - wave1Pos);
+                        float dist2 = fabs(y - wave2Pos);
+
+                        CRGB finalColor = CRGB::Black;
+
+                        if (dist1 < 0.12f) {
+                            uint8_t brightness = (uint8_t)((1.0f - dist1 / 0.12f) * 255);
+                            CRGB c = currentColor;
+                            c.nscale8(brightness);
+                            finalColor += c;
+                        }
+                        if (dist2 < 0.12f) {
+                            uint8_t brightness = (uint8_t)((1.0f - dist2 / 0.12f) * 255);
+                            CRGB c = complementaryColor;
+                            c.nscale8(brightness);
+                            finalColor += c;
+                        }
+
+                        leds[ledIndex] = finalColor;
+                    }
+                }
+            }
+            break;
+
+        case 35: // Farbrad - Rotierendes Farbrad um das Zentrum
+            {
+                static float rotation = 0.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = max(5UL, 50UL - (animationSpeed / 2));
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    rotation += 0.05f;
+                    if (rotation > 6.28f) rotation -= 6.28f;
+                }
+
+                // Zentrum berechnen
+                float centerX = 0.0f, centerY = 0.0f;
+                if (geometryConfigLoaded) {
+                    for (int h = 0; h < numConfiguredHexagons; h++) {
+                        centerX += hexGeometry[h].globalX;
+                        centerY += hexGeometry[h].globalY;
+                    }
+                    centerX /= numConfiguredHexagons;
+                    centerY /= numConfiguredHexagons;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float x = ledGlobalX[ledIndex];
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        float dx = x - centerX;
+                        float dy = y - centerY;
+
+                        // Winkel zum Zentrum
+                        float angle = atan2(dy, dx) + rotation;
+
+                        // Hue basierend auf Winkel (0-360° -> 0-255)
+                        uint8_t hue = (uint8_t)((angle + 3.14159f) / 6.28318f * 255);
+
+                        leds[ledIndex] = CHSV(hue, 255, 255);
+                    }
+                }
+            }
+            break;
+
+        case 36: // Atmendes Zentrum - Pulsierendes Licht vom Zentrum
+            {
+                static float breathPhase = 0.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = max(10UL, 50UL - (animationSpeed / 2));
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    breathPhase += 0.05f;
+                    if (breathPhase > 6.28f) breathPhase -= 6.28f;
+                }
+
+                // Zentrum berechnen
+                float centerX = 0.0f, centerY = 0.0f;
+                if (geometryConfigLoaded) {
+                    for (int h = 0; h < numConfiguredHexagons; h++) {
+                        centerX += hexGeometry[h].globalX;
+                        centerY += hexGeometry[h].globalY;
+                    }
+                    centerX /= numConfiguredHexagons;
+                    centerY /= numConfiguredHexagons;
+                }
+
+                // Atmendes Radius
+                float breathRadius = (sin(breathPhase) + 1.0f) / 2.0f * 2.0f;  // 0 bis 2
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float x = ledGlobalX[ledIndex];
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        float dx = x - centerX;
+                        float dy = y - centerY;
+                        float dist = sqrt(dx * dx + dy * dy);
+
+                        // Helligkeit basierend auf Distanz und Atem-Phase
+                        float brightness = 1.0f - (dist / breathRadius);
+                        brightness = constrain(brightness, 0.0f, 1.0f);
+
+                        CRGB color = currentColor;
+                        color.nscale8((uint8_t)(brightness * 255));
+                        leds[ledIndex] = color;
+                    }
+                }
+            }
+            break;
+
+        case 37: // Schachbrett-Animation - Alternierende Hexagone blinken
+            {
+                static bool phase = false;
+                static unsigned long lastToggle = 0;
+                unsigned long now = millis();
+
+                unsigned long toggleInterval = 1000 - (animationSpeed * 9);
+
+                if (now - lastToggle >= toggleInterval) {
+                    lastToggle = now;
+                    phase = !phase;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    bool isOn = (h % 2 == 0) ? phase : !phase;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        if (isOn) {
+                            leds[hexagons[h].startLED + j] = currentColor;
+                        } else {
+                            leds[hexagons[h].startLED + j] = CRGB::Black;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 38: // Meteor - Fallende Sternschnuppen mit Schweif
+            {
+                static float meteorY[3] = {1.5f, 2.0f, 2.5f};  // 3 Meteore
+                static float meteorX[3] = {0.0f, 0.5f, -0.3f};
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = 50 - (animationSpeed / 3);
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+
+                    for (int m = 0; m < 3; m++) {
+                        meteorY[m] -= 0.08f;
+                        meteorX[m] += 0.02f;
+
+                        // Respawn wenn außerhalb
+                        if (meteorY[m] < -1.0f) {
+                            meteorY[m] = 1.5f + random(100) / 100.0f;
+                            meteorX[m] = -1.0f + random(200) / 100.0f;
+                        }
+                    }
+                }
+
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float x = ledGlobalX[ledIndex];
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        // Prüfe alle Meteore
+                        for (int m = 0; m < 3; m++) {
+                            float dx = x - meteorX[m];
+                            float dy = y - meteorY[m];
+
+                            // Meteor-Kopf
+                            float dist = sqrt(dx * dx + dy * dy);
+                            if (dist < 0.15f) {
+                                uint8_t brightness = (uint8_t)((1.0f - dist / 0.15f) * 255);
+                                CRGB color = CRGB::White;
+                                color.nscale8(brightness);
+                                leds[ledIndex] += color;
+                            }
+
+                            // Schweif (diagonal nach oben-links)
+                            float tailDist = dy - dx * 0.5f;  // Diagonale Linie
+                            if (tailDist > 0 && tailDist < 0.4f && fabs(dx) < 0.1f) {
+                                uint8_t brightness = (uint8_t)((1.0f - tailDist / 0.4f) * 180);
+                                CRGB color = currentColor;
+                                color.nscale8(brightness);
+                                leds[ledIndex] += color;
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+
+        case 39: // Wellenwand - Horizontale Wellen wie Wasserwellen
+            {
+                static float phase = 0.0f;
+                static unsigned long lastUpdate = 0;
+                unsigned long now = millis();
+
+                unsigned long updateInterval = max(10UL, 40UL - (animationSpeed / 3));
+
+                if (now - lastUpdate >= updateInterval) {
+                    lastUpdate = now;
+                    phase += 0.1f;
+                }
+
+                for (int h = 0; h < NUM_HEXAGONS; h++) {
+                    if (!hexagons[h].enabled) continue;
+
+                    for (int j = 0; j < hexagons[h].count; j++) {
+                        uint16_t ledIndex = hexagons[h].startLED + j;
+
+                        float x = ledGlobalX[ledIndex];
+                        float y = getLEDPreciseY(h, j);
+                        if (geometryConfigLoaded && h < numConfiguredHexagons) {
+                            y = hexGeometry[h].globalY + (y - 0.5f);
+                        }
+
+                        // Mehrere überlagerte Sinuswellen
+                        float wave = sin(x * 4.0f + phase) * 0.15f;
+                        wave += sin(x * 7.0f - phase * 0.7f) * 0.08f;
+                        wave += sin(x * 2.0f + phase * 1.3f) * 0.1f;
+
+                        // Y-Position mit Welle vergleichen
+                        float baseY = 0.5f + wave;
+                        float dist = fabs(y - baseY);
+
+                        if (dist < 0.12f) {
+                            uint8_t brightness = (uint8_t)((1.0f - dist / 0.12f) * 255);
+                            // Blaue Wasserfarbe oder gewählte Farbe
+                            CRGB color = currentColor;
+                            color.nscale8(brightness);
+                            leds[ledIndex] = color;
+                        } else {
+                            leds[ledIndex] = CRGB::Black;
                         }
                     }
                 }

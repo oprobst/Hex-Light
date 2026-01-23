@@ -174,6 +174,108 @@ for (int i = hexagons[0].startLED; i < hexagons[0].startLED + hexagons[0].count;
 FastLED.show();
 ```
 
+## Hexagon-Geometrie-Konfiguration
+
+Für übergreifende LED-Muster (z.B. Regenbogen von unten nach oben über alle Hexagone) wird eine Geometrie-Konfiguration benötigt. Diese beschreibt, wie die Hexagone physisch angeordnet sind und in welcher Reihenfolge die LEDs verlaufen.
+
+### Konfigurationsdatei
+
+Die Konfiguration wird automatisch beim Start basierend auf der **IP-Adresse** der Lampe geladen:
+
+```
+data/config/<IP-Adresse>.cfg
+```
+
+Beispiel: `data/config/192.168.3.70.cfg`
+
+### Konfigurationsformat
+
+Jedes Hexagon wird durch einen Eintrag beschrieben, getrennt durch Semikolon (`;`):
+
+```
+<Hexagon-Nr> <Startseite><Richtung> [<Seite>H<Nachbar-Nr> ...]
+```
+
+**Elemente:**
+
+| Element | Beschreibung | Werte |
+|---------|--------------|-------|
+| Hexagon-Nr | Position im LED-Strip (1-basiert) | 1, 2, 3, ... |
+| Startseite | Seite, an der die LEDs beginnen | 1-6 |
+| Richtung | LED-Wicklungsrichtung | U (Uhrzeigersinn), G (Gegen) |
+| Nachbar | Optional: Benachbarte Hexagone | `<Seite>H<Nr>` |
+
+### Hexagon-Seiten
+
+Die Hexagone sind mit einer **flachen Seite oben** ausgerichtet. Die Seiten sind im Uhrzeigersinn nummeriert:
+
+```
+        _____ 1 (oben)
+       /     \
+    6 /       \ 2
+      \       /
+    5  \_____/ 3
+         4 (unten)
+```
+
+### Beispielkonfiguration
+
+Für eine 7-Hexagon-Lampe unter IP `192.168.3.70`:
+
+```
+1 2U 3H2; 2 1U 3H3; 3 3G 3H4; 4 1U 1H5; 5 6U 6H6; 6 4U; 7 6U 5H5
+```
+
+**Erklärung:**
+
+| Eintrag | Bedeutung |
+|---------|-----------|
+| `1 2U 3H2` | Hexagon 1: LEDs starten an Seite 2, im Uhrzeigersinn, Hexagon 2 liegt an Seite 3 |
+| `2 1U 3H3` | Hexagon 2: LEDs starten an Seite 1 (oben), im Uhrzeigersinn, Hexagon 3 liegt an Seite 3 |
+| `3 3G 3H4` | Hexagon 3: LEDs starten an Seite 3, **gegen** Uhrzeigersinn, Hexagon 4 liegt an Seite 3 |
+| `6 4U` | Hexagon 6: LEDs starten an Seite 4 (unten), im Uhrzeigersinn, keine Nachbarn definiert |
+
+### Harmonisierte Kreislauf-Muster (Modi 8-12, 20-21)
+
+Diese Modi nutzen die Geometrie-Konfiguration für synchrone Bewegungen:
+
+| Modus | Name | Beschreibung |
+|-------|------|--------------|
+| 8 | Running Light | Einzelne LED wandert harmonisch durch alle Hexagone |
+| 9 | Chase/Comet | Leuchtschweif mit Fade-out an Hexagon-Übergängen |
+| 11 | Kreislauf Synchron | Alle Hexagone drehen im Uhrzeigersinn, gleiche Ecke |
+| 12 | Kreislauf Komplementär | Wie 11, mit gegenüberliegender Komplementärfarbe |
+| 20 | Kreislauf Alternierend | Jedes 2. Hexagon dreht gegen den Uhrzeigersinn |
+| 21 | Kreislauf Alt. + Komplementär | Wie 20, mit Komplementärfarbe |
+
+### Übergreifende Geometrie-Muster (Modi 13-19)
+
+Diese Modi nutzen die Y/X-Koordinaten der LEDs:
+
+| Modus | Name | Beschreibung |
+|-------|------|--------------|
+| 13 | Vertikaler Regenbogen | Regenbogenfarben von unten nach oben |
+| 14 | Horizontaler Regenbogen | Regenbogenfarben von links nach rechts |
+| 15 | Vertikaler Farbverlauf | Ausgewählte Farbe oben, schwarz unten |
+| 16 | Vertikale Welle | Farbwelle wandert von unten nach oben |
+| 17 | Feuer-Effekt | Realistische Flammen von unten |
+| 18 | Aurora/Nordlicht | Wellenförmige grün-blaue Farbverläufe |
+| 19 | Plasma | Psychedelische, fließende Farbmuster |
+
+### Upload der Konfiguration
+
+Die Konfigurationsdateien werden mit PlatformIO ins LittleFS hochgeladen:
+
+```bash
+pio run --target uploadfs
+```
+
+**Wichtig:** Das `data/`-Verzeichnis muss die `config/`-Unterordner mit den `.cfg`-Dateien enthalten.
+
+### Ohne Konfiguration
+
+Ist keine Konfigurationsdatei vorhanden, werden die Geometrie-Muster trotzdem angezeigt, jedoch mit einer linearen LED-Anordnung (alle LEDs von 0 bis NUM_LEDS als Y-Koordinate).
+
 ## Fehlerbehebung
 
 ### LED-Streifen leuchtet nicht
