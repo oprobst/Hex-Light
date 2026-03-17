@@ -8,11 +8,15 @@
 // Externe Variablen aus main.cpp
 extern CRGB leds[];
 
+static constexpr unsigned long AP_TIMEOUT_MS = 180000;  // 3 Minuten
+static unsigned long fallbackApStart = 0;
+static bool fallbackApActive = false;
+
 void setupWiFi() {
     if (USE_AP_MODE) {
-        // Access Point Modus
+        // Access Point Modus (dauerhaft)
         WiFi.mode(WIFI_AP);
-        WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+        WiFi.softAP(AP_SSID, WIFI_PASSWORD);
         Serial.println("WiFi AP Mode started");
         Serial.print("AP IP: ");
         Serial.println(WiFi.softAPIP());
@@ -34,10 +38,21 @@ void setupWiFi() {
             Serial.print("IP: ");
             Serial.println(WiFi.localIP());
         } else {
-            Serial.println("\nWiFi connection failed - switching to AP mode");
+            Serial.println("\nWiFi connection failed - switching to AP mode (3 min timeout)");
             WiFi.mode(WIFI_AP);
-            WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+            WiFi.softAP(AP_SSID, WIFI_PASSWORD);
+            fallbackApStart = millis();
+            fallbackApActive = true;
         }
+    }
+}
+
+void handleWiFi() {
+    if (fallbackApActive && (millis() - fallbackApStart >= AP_TIMEOUT_MS)) {
+        Serial.println("[WiFi] Fallback-AP Timeout - AP wird deaktiviert");
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_OFF);
+        fallbackApActive = false;
     }
 }
 

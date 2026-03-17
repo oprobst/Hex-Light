@@ -75,6 +75,7 @@ void setup() {
 // ===== Main Loop =====
 void loop() {
     handleOTA();
+    handleWiFi();
 
     // MQTT Verbindung aufrechterhalten
     if (!mqttClient.connected()) {
@@ -101,11 +102,11 @@ void setupLEDs() {
 // ===== Effect Context Initialisierung =====
 void initEffectContext() {
     effectCtx.leds = leds;
-    effectCtx.numLeds = NUM_LEDS;
+    effectCtx.numLeds = numConfiguredHexagons > 0 ? numConfiguredHexagons * LEDS_PER_HEXAGON : NUM_LEDS;
     effectCtx.color = currentColor;
     effectCtx.speed = animationSpeed;
     effectCtx.hexagons = hexagons;
-    effectCtx.numHexagons = NUM_HEXAGONS;
+    effectCtx.numHexagons = numConfiguredHexagons > 0 ? numConfiguredHexagons : NUM_HEXAGONS;
     effectCtx.ledsPerHexagon = LEDS_PER_HEXAGON;
     effectCtx.ledGlobalX = ledGlobalX;
     effectCtx.ledGlobalY = ledGlobalY;

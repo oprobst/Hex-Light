@@ -12,9 +12,9 @@
 
 // Konfigurationskonstanten
 #define MAX_HEXAGONS 12
-#define NUM_LEDS 238
+#define NUM_LEDS 408           // 12 Hexagons × 34 LEDs (Maximum)
 #define LEDS_PER_HEXAGON 34
-#define NUM_HEXAGONS 7
+#define NUM_HEXAGONS 12        // Maximum, tatsächliche Anzahl aus Config
 
 // Globale Geometrie-Daten
 extern HexGeometry hexGeometry[];

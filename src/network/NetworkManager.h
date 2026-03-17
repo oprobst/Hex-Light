@@ -9,6 +9,9 @@
 // WiFi Setup (Station oder AP-Modus)
 void setupWiFi();
 
+// WiFi Loop Handler (schaltet Fallback-AP nach Timeout ab)
+void handleWiFi();
+
 // OTA Update Setup
 void setupOTA();
 

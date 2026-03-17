@@ -13,7 +13,7 @@ bool geometryConfigLoaded = false;
 float ledGlobalY[NUM_LEDS];
 float ledGlobalX[NUM_LEDS];
 
-// Hexagon-Segmente (7 Hexagone mit jeweils 34 LEDs @ 55cm)
+// Hexagon-Segmente (bis zu 12 Hexagone mit jeweils 34 LEDs @ 55cm)
 HexSegment hexagons[NUM_HEXAGONS] = {
     {0, 34, true},      // Hexagon 1: LEDs 0-33
     {34, 34, true},     // Hexagon 2: LEDs 34-67
@@ -21,7 +21,12 @@ HexSegment hexagons[NUM_HEXAGONS] = {
     {102, 34, true},    // Hexagon 4: LEDs 102-135
     {136, 34, true},    // Hexagon 5: LEDs 136-169
     {170, 34, true},    // Hexagon 6: LEDs 170-203
-    {204, 34, true}     // Hexagon 7: LEDs 204-237
+    {204, 34, true},    // Hexagon 7: LEDs 204-237
+    {238, 34, true},    // Hexagon 8: LEDs 238-271
+    {272, 34, true},    // Hexagon 9: LEDs 272-305
+    {306, 34, true},    // Hexagon 10: LEDs 306-339
+    {340, 34, true},    // Hexagon 11: LEDs 340-373
+    {374, 34, true}     // Hexagon 12: LEDs 374-407
 };
 
 /**
