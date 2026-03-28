@@ -124,6 +124,7 @@ const char WEB_UI_HTML[] PROGMEM = R"HTMLDELIM(
                 <button class="mode-btn" data-mode="10">Strobe Long</button>
                 <button class="mode-btn" data-mode="28">Herzschlag</button>
                 <button class="mode-btn" data-mode="29">Funken</button>
+                <button class="mode-btn" data-mode="40">Bunte Funken</button>
             </div>
         </div>
 
@@ -247,7 +248,8 @@ const char WEB_UI_HTML[] PROGMEM = R"HTMLDELIM(
             27: 'Strudel', 28: 'Herzschlag', 29: 'Funken',
             30: 'Regen', 31: 'Bouncing Ball', 32: 'Lava Lamp',
             33: 'Matrix Rain', 34: 'Wellen-Kollision', 35: 'Farbrad',
-            36: 'Atmendes Zentrum', 37: 'Schachbrett', 38: 'Meteor', 39: 'Wellenwand'
+            36: 'Atmendes Zentrum', 37: 'Schachbrett', 38: 'Meteor', 39: 'Wellenwand',
+            40: 'Bunte Funken'
         };
 
         function toggleCategory(name) {

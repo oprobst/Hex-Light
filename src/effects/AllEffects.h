@@ -17,6 +17,7 @@
 #include "basic/StrobeLongEffect.h"
 #include "basic/HeartbeatEffect.h"
 #include "basic/SparkleEffect.h"
+#include "basic/RainbowSparkleEffect.h"
 
 // Circle effects
 #include "circle/RunningLightEffect.h"
@@ -69,6 +70,7 @@ namespace Effects {
     static StrobeLongEffect strobeLong;
     static HeartbeatEffect heartbeat;
     static SparkleEffect sparkle;
+    static RainbowSparkleEffect rainbowSparkle;
 
     // Circle (8-12, 20-21)
     static RunningLightEffect runningLight;
@@ -126,6 +128,7 @@ namespace Effects {
         reg.registerEffect(10, &strobeLong);
         reg.registerEffect(28, &heartbeat);
         reg.registerEffect(29, &sparkle);
+        reg.registerEffect(40, &rainbowSparkle);
 
         // Circle effects (8-9, 11-12, 20-21)
         reg.registerEffect(8, &runningLight);
